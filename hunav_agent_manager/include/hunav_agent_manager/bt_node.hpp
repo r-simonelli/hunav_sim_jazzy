@@ -206,12 +206,27 @@ protected:
 
   sfm::Forces getAgentForces(int id) { return btfunc_.getAgentForces(id); };
 
+  /**
+   * @brief Live goal redirection for an agent, e.g. from an RViz2 "2D Nav
+   * Goal" relay. Applied directly on AgentManager (the BT's own goal
+   * queue), since updateAgents() intentionally ignores goal changes coming
+   * back through the per-tick compute_agents request (goals are meant to
+   * be BT-owned) -- this is the one legitimate side channel to redirect an
+   * agent without teleporting it.
+   *
+   * @param msg contains the agent id and the new goal (first pose in
+   * goals is used)
+   */
+  void goalOverrideCallback(const hunav_msgs::msg::Agent::SharedPtr msg);
+
   // Services provided
   rclcpp::Service<hunav_msgs::srv::ComputeAgents>::SharedPtr agents_srv_;
   rclcpp::Service<hunav_msgs::srv::ComputeAgent>::SharedPtr agent_srv_;
   rclcpp::Service<hunav_msgs::srv::MoveAgent>::SharedPtr move_agent_srv_;
 
   rclcpp::Service<hunav_msgs::srv::ResetAgents>::SharedPtr reset_srv_;
+
+  rclcpp::Subscription<hunav_msgs::msg::Agent>::SharedPtr goal_override_sub_;
 
   // Service client to get parameters from hunav_loader
   rclcpp::Client<hunav_msgs::srv::GetParameters>::SharedPtr get_parameters_client_;

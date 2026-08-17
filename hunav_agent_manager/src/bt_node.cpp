@@ -110,8 +110,11 @@ namespace hunav
       
       try {
         std::string share_dir = ament_index_cpp::get_package_share_directory(package_name);
-        std::string src_dir = share_to_src_path(share_dir);
-        bt_dir_base_ = src_dir + "/behavior_trees";
+        // share_to_src_path() assumed every workspace lays sources out at
+        // <ws>/src/<pkg>; guess-transforming the install path can point at
+        // a directory that does not exist and silently leaves
+        // bt_dir_base_ empty. The installed share dir is always correct.
+        bt_dir_base_ = share_dir + "/behavior_trees";
         RCLCPP_INFO(this->get_logger(),
                     "Found ROS2 package '%s', behavior trees will be loaded from: %s",
                     package_name.c_str(), bt_dir_base_.c_str());
@@ -136,6 +139,10 @@ namespace hunav
       "move_agent", std::bind(&BTnode::moveAgentService, this, _1, _2));
     reset_srv_ = this->create_service<hunav_msgs::srv::ResetAgents>(
       "reset_agents", std::bind(&BTnode::resetAgentsService, this, _1, _2));
+
+    goal_override_sub_ = this->create_subscription<hunav_msgs::msg::Agent>(
+      "hunav/goal_override", 10,
+      std::bind(&BTnode::goalOverrideCallback, this, _1));
 
     if (pub_forces_) {
       forces_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -313,9 +320,11 @@ namespace hunav
     
     RCLCPP_INFO(this->get_logger(), "Loading BT file: %s", fullpath.c_str());
 
+    bool loaded = false;
     try
     {
       trees_[_agent.id] = factory_.createTreeFromFile(fullpath, blackboard);
+      loaded = true;
     }
     catch (const std::exception &e)
     {
@@ -323,6 +332,15 @@ namespace hunav
           this->get_logger(),
           "Failed to load BT XML for agent %d: %s - Check %s for any format mistakes",
           _agent.id, e.what(), fullpath.c_str());
+    }
+
+    if (!loaded)
+    {
+      // Leaving an invalid/default-constructed BT::Tree in trees_[id] and
+      // continuing (previous behavior) crashes the whole node the first
+      // time it is ticked, taking every other agent down too.
+      trees_.erase(_agent.id);
+      return;
     }
 
     if (_agent.id == 1)
@@ -454,6 +472,26 @@ namespace hunav
     //}
 
     response->updated_agents = btfunc_.getUpdatedAgents();
+  }
+
+  void BTnode::goalOverrideCallback(const hunav_msgs::msg::Agent::SharedPtr msg)
+  {
+    if (msg->goals.empty())
+    {
+      RCLCPP_WARN(this->get_logger(), "Goal override for agent %d has no goals, ignoring", msg->id);
+      return;
+    }
+    if (!g_agent_manager)
+    {
+      RCLCPP_ERROR(this->get_logger(), "Goal override received before AgentManager is ready, ignoring");
+      return;
+    }
+    sfm::Goal goal;
+    goal.center.set(msg->goals.front().position.x, msg->goals.front().position.y);
+    goal.radius = msg->goal_radius > 0.0f ? msg->goal_radius : 0.3;
+    g_agent_manager->clearAndSetAgentGoal(msg->id, goal);
+    RCLCPP_INFO(this->get_logger(), "Live goal override applied to agent %d: [%.2f, %.2f]",
+                msg->id, goal.center.getX(), goal.center.getY());
   }
 
   void BTnode::resetAgentsService(const std::shared_ptr<hunav_msgs::srv::ResetAgents::Request> request,
