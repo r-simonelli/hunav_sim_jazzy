@@ -241,6 +241,26 @@ public:
   void clearAndSetAgentGoals(int id, const std::list<sfm::Goal> &goals);
   void setAgentGroupId(int id, int group_id);
 
+  /**
+   * @brief Hand the agent's motion to a live linear/angular velocity
+   * command, bypassing SFM until clearAgentTeleop() is called. computeForces()
+   * and updatePosition() both check sfmAgent.teleoperated (lightsfm's own
+   * flag for this, otherwise unused by this codebase) and skip the SFM path
+   * when set.
+   *
+   * @param id identifier of the agent
+   * @param linear commanded forward speed (m/s)
+   * @param angular commanded turn rate (rad/s)
+   */
+  void setAgentTeleopVelocity(int id, double linear, double angular);
+
+  /**
+   * @brief Release a teleoperated agent back to autonomous SFM behavior.
+   *
+   * @param id identifier of the agent
+   */
+  void clearAgentTeleop(int id);
+
   void restoreAgentGoals(int agent_id, const std::list<sfm::Goal>& goals);
   void overrideAgentGoals(int agent_id, int target_id);
 

@@ -3,6 +3,7 @@
 #include <ament_index_cpp/get_package_prefix.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/color_rgba.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -219,6 +220,19 @@ protected:
    */
   void goalOverrideCallback(const hunav_msgs::msg::Agent::SharedPtr msg);
 
+  /**
+   * @brief Live teleop override for one agent (e.g. teleop_twist_keyboard
+   * remapped onto this topic). Drives the agent kinematically via
+   * AgentManager::setAgentTeleopVelocity(), bypassing SFM entirely for as
+   * long as commands keep arriving. If no command arrives within
+   * teleop_timeout_ seconds, computeAgentsService() releases the agent back
+   * to autonomous SFM via AgentManager::clearAgentTeleop() -- teleop is
+   * meant as a temporary override, not a standing mode switch.
+   *
+   * @param msg commanded linear.x (m/s) / angular.z (rad/s)
+   */
+  void teleopCmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
+
   // Services provided
   rclcpp::Service<hunav_msgs::srv::ComputeAgents>::SharedPtr agents_srv_;
   rclcpp::Service<hunav_msgs::srv::ComputeAgent>::SharedPtr agent_srv_;
@@ -227,6 +241,11 @@ protected:
   rclcpp::Service<hunav_msgs::srv::ResetAgents>::SharedPtr reset_srv_;
 
   rclcpp::Subscription<hunav_msgs::msg::Agent>::SharedPtr goal_override_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr teleop_cmd_vel_sub_;
+  int teleop_agent_id_;
+  double teleop_timeout_;
+  bool teleop_active_;
+  rclcpp::Time last_teleop_cmd_time_;
 
   // Service client to get parameters from hunav_loader
   rclcpp::Client<hunav_msgs::srv::GetParameters>::SharedPtr get_parameters_client_;

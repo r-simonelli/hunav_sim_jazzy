@@ -67,6 +67,13 @@ namespace hunav
   // 1) Parameters local to this node
   pub_tf_     = this->declare_parameter<bool>("publish_tf", true);
   pub_forces_ = this->declare_parameter<bool>("publish_sfm_forces", true);
+  // Which agent hunav/teleop_cmd_vel drives, and how long to wait after the
+  // last command before releasing that agent back to autonomous SFM. 2
+  // matches this workspace's usual single-human scenarios (hunav_goal_relay
+  // defaults to the same agent id).
+  teleop_agent_id_ = this->declare_parameter<int>("teleop_agent_id", 2);
+  teleop_timeout_  = this->declare_parameter<double>("teleop_timeout", 0.5);
+  teleop_active_   = false;
 
   // 2) Create service client to get parameters from hunav_loader
   get_parameters_client_ = this->create_client<hunav_msgs::srv::GetParameters>("/get_parameters");
@@ -143,6 +150,10 @@ namespace hunav
     goal_override_sub_ = this->create_subscription<hunav_msgs::msg::Agent>(
       "hunav/goal_override", 10,
       std::bind(&BTnode::goalOverrideCallback, this, _1));
+
+    teleop_cmd_vel_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+      "hunav/teleop_cmd_vel", 10,
+      std::bind(&BTnode::teleopCmdVelCallback, this, _1));
 
     if (pub_forces_) {
       forces_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -466,6 +477,21 @@ namespace hunav
     if (time_step_secs < 0.0)
       time_step_secs = 0.0; // 0.05
 
+    // Teleop is a temporary override, not a standing mode: release it back
+    // to autonomous SFM once commands stop arriving (e.g. the operator lets
+    // go of the keyboard, or the teleop node was closed).
+    if (teleop_active_ && g_agent_manager)
+    {
+      double since_last_cmd = (this->get_clock()->now() - last_teleop_cmd_time_).seconds();
+      if (since_last_cmd > teleop_timeout_)
+      {
+        g_agent_manager->clearAgentTeleop(teleop_agent_id_);
+        teleop_active_ = false;
+        RCLCPP_INFO(this->get_logger(), "Teleop for agent %d timed out, returning to autonomous SFM",
+                    teleop_agent_id_);
+      }
+    }
+
     //BT::NodeStatus status = tree_tick(time_step_secs);
     (void)tree_tick(time_step_secs);
     prev_time_ = rclcpp::Time(ag->header.stamp);
@@ -492,6 +518,23 @@ namespace hunav
     g_agent_manager->clearAndSetAgentGoal(msg->id, goal);
     RCLCPP_INFO(this->get_logger(), "Live goal override applied to agent %d: [%.2f, %.2f]",
                 msg->id, goal.center.getX(), goal.center.getY());
+  }
+
+  void BTnode::teleopCmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
+  {
+    if (!g_agent_manager)
+    {
+      RCLCPP_ERROR(this->get_logger(), "Teleop cmd_vel received before AgentManager is ready, ignoring");
+      return;
+    }
+    if (!teleop_active_)
+    {
+      RCLCPP_INFO(this->get_logger(), "Teleop engaged for agent %d, SFM suspended for it until %.1fs of silence",
+                  teleop_agent_id_, teleop_timeout_);
+    }
+    teleop_active_ = true;
+    last_teleop_cmd_time_ = this->get_clock()->now();
+    g_agent_manager->setAgentTeleopVelocity(teleop_agent_id_, msg->linear.x, msg->angular.z);
   }
 
   void BTnode::resetAgentsService(const std::shared_ptr<hunav_msgs::srv::ResetAgents::Request> request,

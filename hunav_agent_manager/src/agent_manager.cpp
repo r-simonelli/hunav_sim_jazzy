@@ -1372,6 +1372,13 @@ std::vector<sfm::Agent> AgentManager::getSFMAgents()
 
 void AgentManager::computeForces(int id)
 {
+  if (agents_[id].sfmAgent.teleoperated)
+  {
+    // Motion comes straight from the commanded velocity in updatePosition();
+    // SFM forces would be computed and immediately discarded.
+    return;
+  }
+
   std::vector<sfm::Agent> otherAgents = getSFMAgents();
 
   utils::Vector2d ob;
@@ -1593,14 +1600,39 @@ void AgentManager::updatePosition(int id, double dt)
 
   agents_[id].behavior.state = 0;
 
+  if (agents_[id].sfmAgent.teleoperated)
+  {
+    // Differential-drive kinematic integration straight from
+    // linearVelocity/angularVelocity, no SFM forces involved. This is
+    // lightsfm's own Agent::move(), only ever called when teleoperated.
+    agents_[id].sfmAgent.move(dt);
+    return;
+  }
+
   float prev_yaw = agents_[id].sfmAgent.yaw.toRadian();
   sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
   if(agents_[id].sfmAgent.linearVelocity < 0.07)
   {
     // keep previous yaw
     agents_[id].sfmAgent.yaw.setRadian(prev_yaw);
-  } 
-  
+  }
+
+}
+
+void AgentManager::setAgentTeleopVelocity(int id, double linear, double angular)
+{
+  std::lock_guard<std::mutex> guard(mutex_);
+  agents_[id].sfmAgent.teleoperated = true;
+  agents_[id].sfmAgent.linearVelocity = linear;
+  agents_[id].sfmAgent.angularVelocity = angular;
+}
+
+void AgentManager::clearAgentTeleop(int id)
+{
+  std::lock_guard<std::mutex> guard(mutex_);
+  agents_[id].sfmAgent.teleoperated = false;
+  agents_[id].sfmAgent.linearVelocity = 0.0;
+  agents_[id].sfmAgent.angularVelocity = 0.0;
 }
 
 }  // namespace hunav
