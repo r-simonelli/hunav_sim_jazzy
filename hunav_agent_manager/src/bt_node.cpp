@@ -68,12 +68,24 @@ namespace hunav
   pub_tf_     = this->declare_parameter<bool>("publish_tf", true);
   pub_forces_ = this->declare_parameter<bool>("publish_sfm_forces", true);
   // Which agent hunav/teleop_cmd_vel drives, and how long to wait after the
-  // last command before releasing that agent back to autonomous SFM. 2
+  // last command before releasing that agent back to autonomous SFM (<= 0
+  // disables that and latches the last velocity). Silence stops the agent, it
+  // never hands it back to SFM. 2
   // matches this workspace's usual single-human scenarios (hunav_goal_relay
   // defaults to the same agent id).
   teleop_agent_id_ = this->declare_parameter<int>("teleop_agent_id", 2);
   teleop_timeout_  = this->declare_parameter<double>("teleop_timeout", 0.5);
   teleop_active_   = false;
+  // Once teleop has engaged the agent never returns to SFM. When commands stop
+  // arriving (key released) it just stands still until the next one. Runs on
+  // wall time in its own timer, independent of the BT tick and of sim time.
+  teleop_stop_timer_ = this->create_wall_timer(std::chrono::milliseconds(50), [this]() {
+    if (!teleop_active_ || teleop_timeout_ <= 0.0 || !g_agent_manager)
+      return;
+    double silent = std::chrono::duration<double>(std::chrono::steady_clock::now() - last_teleop_cmd_time_).count();
+    if (silent > teleop_timeout_)
+      g_agent_manager->setAgentTeleopVelocity(teleop_agent_id_, 0.0, 0.0);
+  });
 
   // 2) Create service client to get parameters from hunav_loader
   get_parameters_client_ = this->create_client<hunav_msgs::srv::GetParameters>("/get_parameters");
@@ -477,21 +489,6 @@ namespace hunav
     if (time_step_secs < 0.0)
       time_step_secs = 0.0; // 0.05
 
-    // Teleop is a temporary override, not a standing mode: release it back
-    // to autonomous SFM once commands stop arriving (e.g. the operator lets
-    // go of the keyboard, or the teleop node was closed).
-    if (teleop_active_ && g_agent_manager)
-    {
-      double since_last_cmd = (this->get_clock()->now() - last_teleop_cmd_time_).seconds();
-      if (since_last_cmd > teleop_timeout_)
-      {
-        g_agent_manager->clearAgentTeleop(teleop_agent_id_);
-        teleop_active_ = false;
-        RCLCPP_INFO(this->get_logger(), "Teleop for agent %d timed out, returning to autonomous SFM",
-                    teleop_agent_id_);
-      }
-    }
-
     //BT::NodeStatus status = tree_tick(time_step_secs);
     (void)tree_tick(time_step_secs);
     prev_time_ = rclcpp::Time(ag->header.stamp);
@@ -529,11 +526,13 @@ namespace hunav
     }
     if (!teleop_active_)
     {
-      RCLCPP_INFO(this->get_logger(), "Teleop engaged for agent %d, SFM suspended for it until %.1fs of silence",
+      RCLCPP_INFO(this->get_logger(), "Teleop engaged for agent %d, SFM suspended for it (stops after %.1fs of silence, never back to SFM)",
                   teleop_agent_id_, teleop_timeout_);
     }
     teleop_active_ = true;
-    last_teleop_cmd_time_ = this->get_clock()->now();
+    last_teleop_cmd_time_ = std::chrono::steady_clock::now();
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 500,
+                         "Teleop cmd: linear %.2f angular %.2f", msg->linear.x, msg->angular.z);
     g_agent_manager->setAgentTeleopVelocity(teleop_agent_id_, msg->linear.x, msg->angular.z);
   }
 

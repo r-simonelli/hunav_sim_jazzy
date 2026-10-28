@@ -245,7 +245,8 @@ protected:
   int teleop_agent_id_;
   double teleop_timeout_;
   bool teleop_active_;
-  rclcpp::Time last_teleop_cmd_time_;
+  std::chrono::steady_clock::time_point last_teleop_cmd_time_;
+  rclcpp::TimerBase::SharedPtr teleop_stop_timer_;
 
   // Service client to get parameters from hunav_loader
   rclcpp::Client<hunav_msgs::srv::GetParameters>::SharedPtr get_parameters_client_;

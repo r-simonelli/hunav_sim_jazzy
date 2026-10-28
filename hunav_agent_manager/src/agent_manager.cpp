@@ -352,7 +352,8 @@ void AgentManager::approximateRobot(int id, double dt, double closest_dist, doub
       // Recompute forces and update the agent's position
       //double prev_yaw = agents_[id].sfmAgent.yaw.toRadian();
       computeForces(id);
-      sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+      if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+        sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
       // if(agents_[id].sfmAgent.linearVelocity < 0.05)
       // {
       //   agents_[id].sfmAgent.yaw.setRadian(prev_yaw);
@@ -478,7 +479,8 @@ void AgentManager::blockRobot(int id, double dt, double front_dist)
 
     // Compute forces and update position (agent moves toward blocking position)
     computeForces(id);
-    sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+    if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+      sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
 
     // Restore original goals and velocity
     agents_[id].sfmAgent.goals = original_goals;
@@ -518,7 +520,8 @@ void AgentManager::blockAgent(int id, int target_id, double dt, double front_dis
 
     // Recompute forces and update the agent's position
     computeForces(id);
-    sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+    if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+      sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
 
     // Now check if the agent is close enough to the target
     float ax = agents_[id].sfmAgent.position.getX();
@@ -686,7 +689,8 @@ void AgentManager::avoidRobot(int id, double dt, double safe_distance, double ma
 
     // Compute forces and update position (agent moves away from robot)
     computeForces(id);
-    sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+    if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+      sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
 
     // Restore original goals and velocity
     agents_[id].sfmAgent.goals = original_goals;
@@ -886,7 +890,8 @@ void AgentManager::approachAgent(int id, int target_id, double dt, double closes
         
         // Recompute forces and update position
         computeForces(id);
-        sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+        if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+          sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
         
         // Remove the temporary goal and restore the original desired velocity
         agents_[id].sfmAgent.goals.pop_front();
@@ -930,7 +935,8 @@ void AgentManager::followAgent(int id, int target_id, double dt, double threshol
     {
         // Update forces and position
         computeForces(id);
-        sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+        if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+          sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
     }
     else
     {
@@ -939,7 +945,8 @@ void AgentManager::followAgent(int id, int target_id, double dt, double threshol
         agents_[id].sfmAgent.desiredVelocity = static_cast<float>(scaled_vel);
         
         computeForces(id);
-        sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
+        if (!agents_[id].sfmAgent.teleoperated) // teleop motion is integrated once, in updatePosition()
+          sfm::SFM.updatePosition(agents_[id].sfmAgent, dt);
         
         // Restore original desired velocity
         agents_[id].sfmAgent.desiredVelocity = original_vel;
@@ -1222,10 +1229,15 @@ bool AgentManager::updateAgents(const hunav_msgs::msg::Agents::SharedPtr msg)
     agents_[a.id].sfmAgent.yaw.setRadian(a.yaw);
 
     // velocities
-    agents_[a.id].sfmAgent.velocity.set(a.velocity.linear.x, a.velocity.linear.y);
-    agents_[a.id].sfmAgent.linearVelocity =
-        sqrt(a.velocity.linear.x * a.velocity.linear.x + a.velocity.linear.y * a.velocity.linear.y);
-    agents_[a.id].sfmAgent.angularVelocity = a.velocity.angular.z;
+    // A teleoperated agent keeps its commanded velocity: overwriting it with
+    // the sim's measured one would cancel every command (and feed back).
+    if (!agents_[a.id].sfmAgent.teleoperated)
+    {
+      agents_[a.id].sfmAgent.velocity.set(a.velocity.linear.x, a.velocity.linear.y);
+      agents_[a.id].sfmAgent.linearVelocity =
+          sqrt(a.velocity.linear.x * a.velocity.linear.x + a.velocity.linear.y * a.velocity.linear.y);
+      agents_[a.id].sfmAgent.angularVelocity = a.velocity.angular.z;
+    }
 
     // update goals
     // agents_[a.id].sfmAgent.goals.clear();
